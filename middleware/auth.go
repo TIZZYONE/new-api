@@ -65,6 +65,9 @@ func authHelper(c *gin.Context, minRole int) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_USER_INVALID", "message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid)})
 		return
 	}
+	if !enforceForcePasswordChange(c, user.Id) {
+		return
+	}
 	setDashboardAuthContext(c, user, identity, useAccessToken)
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
@@ -100,6 +103,50 @@ func TryUserAuth() func(c *gin.Context) {
 func UserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleCommonUser)
+	}
+}
+
+// enforceForcePasswordChange blocks authenticated dashboard APIs until the
+// required first-login password change completes. Whitelisted routes cover
+// reading the profile, changing the password, and security verification.
+func enforceForcePasswordChange(c *gin.Context, userId int) bool {
+	if !common.ForcePasswordChangeOnFirstLoginEnabled {
+		return true
+	}
+	mustChange, err := model.UserRequiresFirstLoginPasswordChange(userId)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"code":    "AUTH_INTERNAL_ERROR",
+			"message": common.TranslateMessage(c, i18n.MsgDatabaseError),
+		})
+		return false
+	}
+	if !mustChange || forcePasswordChangeAllowed(c) {
+		return true
+	}
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+		"success": false,
+		"code":    "PASSWORD_CHANGE_REQUIRED",
+		"message": common.TranslateMessage(c, i18n.MsgAuthPasswordChangeRequired),
+	})
+	return false
+}
+
+func forcePasswordChangeAllowed(c *gin.Context) bool {
+	path := c.FullPath()
+	method := c.Request.Method
+	switch {
+	case method == http.MethodGet && path == "/api/user/self":
+		return true
+	case method == http.MethodPut && path == "/api/user/self":
+		return true
+	case method == http.MethodGet && path == "/api/verify/methods":
+		return true
+	case method == http.MethodPost && path == "/api/verify":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -472,6 +519,20 @@ func TokenAuth() func(c *gin.Context) {
 		if !userEnabled {
 			abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))
 			return
+		}
+		if common.ForcePasswordChangeOnFirstLoginEnabled {
+			mustChange, mustErr := model.UserRequiresFirstLoginPasswordChange(token.UserId)
+			if mustErr != nil {
+				common.SysLog(fmt.Sprintf("TokenAuth password-change check error for user %d: %v", token.UserId, mustErr))
+				abortWithOpenAiMessage(c, http.StatusInternalServerError,
+					common.TranslateMessage(c, i18n.MsgDatabaseError))
+				return
+			}
+			if mustChange {
+				abortWithOpenAiMessage(c, http.StatusForbidden,
+					common.TranslateMessage(c, i18n.MsgAuthPasswordChangeRequired), types.ErrorCodeAccessDenied)
+				return
+			}
 		}
 
 		userCache.WriteContext(c)

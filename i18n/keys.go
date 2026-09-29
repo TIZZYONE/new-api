@@ -40,6 +40,7 @@ const (
 	MsgAuthUserIdMismatch        = "auth.user_id_mismatch"
 	MsgAuthUserBanned            = "auth.user_banned"
 	MsgAuthInsufficientPrivilege = "auth.insufficient_privilege"
+	MsgAuthPasswordChangeRequired = "auth.password_change_required"
 )
 
 // Token related messages

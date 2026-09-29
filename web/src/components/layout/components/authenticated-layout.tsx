@@ -23,6 +23,7 @@ import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
 import { getCookie } from '@/lib/cookies'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { AppHeader } from './app-header'
 import { AppSidebar } from './app-sidebar'
@@ -33,6 +34,13 @@ type AuthenticatedLayoutProps = {
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   const defaultOpen = getCookie('sidebar_state') !== 'false'
+  const mustChangePassword = useAuthStore(
+    (state) => state.auth.user?.must_change_password === true
+  )
+
+  if (mustChangePassword) {
+    return props.children ?? <AnimatedOutlet />
+  }
 
   return (
     <LayoutProvider>

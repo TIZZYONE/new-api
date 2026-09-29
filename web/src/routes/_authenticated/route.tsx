@@ -22,6 +22,8 @@ import { AuthenticatedLayout } from '@/components/layout'
 import { resolveAuthentication } from '@/lib/auth-session'
 import { useAuthStore } from '@/stores/auth-store'
 
+const FORCE_CHANGE_PASSWORD_PATH = '/force-change-password'
+
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async ({ location }) => {
     // The root guard may have skipped its refresh because no session hint was
@@ -37,6 +39,18 @@ export const Route = createFileRoute('/_authenticated')({
         to: '/sign-in',
         search: { redirect: location.href },
       })
+    }
+
+    const onForceChangePage =
+      location.pathname === FORCE_CHANGE_PASSWORD_PATH ||
+      location.pathname.endsWith(FORCE_CHANGE_PASSWORD_PATH)
+
+    if (auth.user.must_change_password && !onForceChangePage) {
+      throw redirect({ to: FORCE_CHANGE_PASSWORD_PATH })
+    }
+
+    if (!auth.user.must_change_password && onForceChangePage) {
+      throw redirect({ to: '/dashboard' })
     }
   },
   component: AuthenticatedLayout,

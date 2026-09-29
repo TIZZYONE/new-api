@@ -63,6 +63,7 @@ interface ChangePasswordDialogProps {
   onOpenChange: (open: boolean) => void
   username: string
   hasPassword?: boolean
+  forced?: boolean
   onSuccess?: () => void
 }
 
@@ -70,6 +71,7 @@ export function ChangePasswordDialog(props: ChangePasswordDialogProps) {
   const { t } = useTranslation()
   const security = useAccountSecurity()
   const hasPassword = props.hasPassword !== false
+  const forced = props.forced === true
   const form = useForm<PasswordChangeValues>({
     resolver: zodResolver(passwordChangeSchema),
     defaultValues: emptyPasswordForm,
@@ -88,6 +90,9 @@ export function ChangePasswordDialog(props: ChangePasswordDialogProps) {
   }, [props.open, cancel, reset])
 
   const handleOpenChange = (open: boolean) => {
+    if (forced && !open) {
+      return
+    }
     if (!open) {
       security.cancel()
       form.reset(emptyPasswordForm)
@@ -145,106 +150,127 @@ export function ChangePasswordDialog(props: ChangePasswordDialogProps) {
     props.onSuccess?.()
   }
   const title = t(hasPassword ? 'Change Password' : 'Set Password')
+  const fields = (
+    <Form {...form}>
+      <form
+        id='change-password-form'
+        onSubmit={form.handleSubmit(submit)}
+        className='space-y-4'
+      >
+        {hasPassword && (
+          <FormField
+            control={form.control}
+            name='originalPassword'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Current Password')}</FormLabel>
+                <FormControl>
+                  <PasswordInput
+                    {...field}
+                    autoComplete='current-password'
+                    disabled={security.pending}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+        <FormField
+          control={form.control}
+          name='newPassword'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('New Password')}</FormLabel>
+              <FormControl>
+                <PasswordInput
+                  {...field}
+                  autoComplete='new-password'
+                  disabled={security.pending}
+                />
+              </FormControl>
+              <p className='text-muted-foreground text-xs'>
+                {t('Use 8–128 characters.')}
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name='confirmPassword'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Confirm New Password')}</FormLabel>
+              <FormControl>
+                <PasswordInput
+                  {...field}
+                  autoComplete='new-password'
+                  disabled={security.pending}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        {forced && (
+          <Button
+            type='submit'
+            className='w-full'
+            disabled={security.pending}
+          >
+            {security.pending && <Loader2 className='size-4 animate-spin' />}
+            {title}
+          </Button>
+        )}
+      </form>
+    </Form>
+  )
 
   return (
     <>
-      <Dialog
-        open={props.open && !security.showVerification}
-        onOpenChange={handleOpenChange}
-        title={title}
-        description={
-          <>
-            {t('Update your password for account:')}{' '}
-            <strong>{props.username}</strong>
-          </>
-        }
-        contentClassName='sm:max-w-md'
-        contentHeight='auto'
-        footer={
-          <>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => handleOpenChange(false)}
-            >
-              {t('Cancel')}
-            </Button>
-            <Button
-              type='submit'
-              form='change-password-form'
-              disabled={security.pending}
-            >
-              {security.pending && <Loader2 className='size-4 animate-spin' />}
-              {title}
-            </Button>
-          </>
-        }
-      >
-        <Form {...form}>
-          <form
-            id='change-password-form'
-            onSubmit={form.handleSubmit(submit)}
-            className='space-y-4'
-          >
-            {hasPassword && (
-              <FormField
-                control={form.control}
-                name='originalPassword'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Current Password')}</FormLabel>
-                    <FormControl>
-                      <PasswordInput
-                        {...field}
-                        autoComplete='current-password'
-                        disabled={security.pending}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
-            <FormField
-              control={form.control}
-              name='newPassword'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('New Password')}</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      {...field}
-                      autoComplete='new-password'
-                      disabled={security.pending}
-                    />
-                  </FormControl>
-                  <p className='text-muted-foreground text-xs'>
-                    {t('Use 8–128 characters.')}
-                  </p>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name='confirmPassword'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Confirm New Password')}</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      {...field}
-                      autoComplete='new-password'
-                      disabled={security.pending}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </form>
-        </Form>
-      </Dialog>
+      {forced ? (
+        !security.showVerification && (
+          <div className='bg-card w-full max-w-md rounded-lg border p-6 shadow-sm'>
+            {fields}
+          </div>
+        )
+      ) : (
+        <Dialog
+          open={props.open && !security.showVerification}
+          onOpenChange={handleOpenChange}
+          title={title}
+          description={
+            <>
+              {t('Update your password for account:')}{' '}
+              <strong>{props.username}</strong>
+            </>
+          }
+          contentClassName='sm:max-w-md'
+          contentHeight='auto'
+          footer={
+            <>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => handleOpenChange(false)}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                type='submit'
+                form='change-password-form'
+                disabled={security.pending}
+              >
+                {security.pending && <Loader2 className='size-4 animate-spin' />}
+                {title}
+              </Button>
+            </>
+          }
+        >
+          {fields}
+        </Dialog>
+      )}
       {security.showVerification && (
         <SecureVerificationDialog {...security.verificationDialogProps} />
       )}

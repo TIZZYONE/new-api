@@ -197,7 +197,10 @@ func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin
 
 func writeLoginResponse(c *gin.Context, user *model.User, bundle *service.AuthBundle) {
 	c.Set("login_method", bundle.Session.LoginMethod)
-	model.UpdateUserLastLoginAt(user.Id)
+	if !shouldDeferLastLoginAtForPasswordChange(user, bundle.Session.LoginMethod) {
+		model.UpdateUserLastLoginAt(user.Id)
+		user.LastLoginAt = common.GetTimestamp()
+	}
 	service.WriteRefreshCookie(c, bundle.RefreshToken)
 	setAuthNoStore(c)
 	recordLoginAudit(user, c)
@@ -212,6 +215,23 @@ func writeLoginResponse(c *gin.Context, user *model.User, bundle *service.AuthBu
 			"user":              buildSelfUserData(user),
 		},
 	})
+}
+
+// shouldDeferLastLoginAtForPasswordChange keeps last_login_at at 0 until the
+// required first-login password change completes. OAuth-family logins are not
+// subject to this policy; password, 2FA, and Passkey logins are.
+func shouldDeferLastLoginAtForPasswordChange(user *model.User, loginMethod string) bool {
+	if !userMustChangePasswordOnFirstLogin(user) {
+		return false
+	}
+	if strings.HasPrefix(loginMethod, "oauth:") || loginMethod == "wechat" || loginMethod == "telegram" {
+		return false
+	}
+	return true
+}
+
+func userMustChangePasswordOnFirstLogin(user *model.User) bool {
+	return common.ForcePasswordChangeOnFirstLoginEnabled && user != nil && user.LastLoginAt == 0 && user.HasPassword
 }
 
 func Register(c *gin.Context) {
@@ -497,6 +517,7 @@ func buildSelfUserData(user *model.User) map[string]any {
 		"username":          user.Username,
 		"display_name":      user.DisplayName,
 		"has_password":      user.HasPassword,
+		"must_change_password": userMustChangePasswordOnFirstLogin(user),
 		"role":              user.Role,
 		"status":            user.Status,
 		"email":             user.Email,
@@ -876,6 +897,9 @@ func UpdateSelf(c *gin.Context) {
 			return
 		}
 		succeeded = true
+		if current.LastLoginAt == 0 {
+			model.UpdateUserLastLoginAt(cleanUser.Id)
+		}
 		notificationFailed = service.NotifyAccountSecurityChange(current.Email, "Password updated") != nil
 		if err := model.PublishUserAuthCache(cleanUser.Id); err != nil {
 			writeSecurityOperationError(c, err)
@@ -895,6 +919,7 @@ func UpdateSelf(c *gin.Context) {
 				"access_expires_at":    bundle.AccessExpiresAt,
 				"session":              bundle.Session,
 				"has_password":         true,
+				"must_change_password": false,
 				"notification_warning": notificationFailed,
 			},
 		})

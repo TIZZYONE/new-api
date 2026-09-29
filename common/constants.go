@@ -62,6 +62,10 @@ var MaxRecentItems = 1000
 var PasswordLoginEnabled = true
 var PasswordLoginEncryptionEnabled = false
 var PasswordRegisterEnabled = true
+
+// ForcePasswordChangeOnFirstLoginEnabled requires a password change after the
+// first successful password (or password+2FA) login when last_login_at is still 0.
+var ForcePasswordChangeOnFirstLoginEnabled = false
 var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
 var LinuxDOOAuthEnabled = false

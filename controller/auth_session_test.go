@@ -153,3 +153,137 @@ func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
 	require.NoError(t, db.First(&stored, user.Id).Error)
 	assert.Equal(t, previousLastLoginAt, stored.LastLoginAt)
 }
+
+func TestForcePasswordChangeOnFirstLoginDefersLastLoginAt(t *testing.T) {
+	previousDB := model.DB
+	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previousForce := common.ForcePasswordChangeOnFirstLoginEnabled
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	model.DB = db
+	common.RedisEnabled = false
+	common.SessionSecret = "force-password-change-test-secret"
+	common.ForcePasswordChangeOnFirstLoginEnabled = true
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
+		common.ForcePasswordChangeOnFirstLoginEnabled = previousForce
+	})
+
+	password, err := common.Password2Hash("first-login-password")
+	require.NoError(t, err)
+	user := &model.User{
+		Username: "force-change-user", Password: password, Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, LastLoginAt: 0,
+	}
+	require.NoError(t, db.Create(user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
+	c.Set("login_method", "password")
+	setupLoginAtAuthVersion(user, user.AuthVersion, c)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var stored model.User
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.Equal(t, int64(0), stored.LastLoginAt)
+	assert.Contains(t, recorder.Body.String(), `"must_change_password":true`)
+
+	common.ForcePasswordChangeOnFirstLoginEnabled = false
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/login", nil)
+	c.Set("login_method", "password")
+	setupLoginAtAuthVersion(user, user.AuthVersion, c)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.NotEqual(t, int64(0), stored.LastLoginAt)
+	assert.Contains(t, recorder.Body.String(), `"must_change_password":false`)
+}
+
+func TestForcePasswordChangeOnFirstLoginSkipsNonPasswordLogin(t *testing.T) {
+	previousDB := model.DB
+	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previousForce := common.ForcePasswordChangeOnFirstLoginEnabled
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	model.DB = db
+	common.RedisEnabled = false
+	common.SessionSecret = "force-password-change-oauth-test-secret"
+	common.ForcePasswordChangeOnFirstLoginEnabled = true
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
+		common.ForcePasswordChangeOnFirstLoginEnabled = previousForce
+	})
+
+	password, err := common.Password2Hash("oauth-first-password")
+	require.NoError(t, err)
+	user := &model.User{
+		Username: "force-change-oauth-user", Password: password, Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, LastLoginAt: 0,
+	}
+	require.NoError(t, db.Create(user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/oauth/github", nil)
+	c.Set("login_method", "oauth:github")
+	setupLoginAtAuthVersion(user, user.AuthVersion, c)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var stored model.User
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.NotEqual(t, int64(0), stored.LastLoginAt)
+	assert.Contains(t, recorder.Body.String(), `"must_change_password":false`)
+}
+
+func TestForcePasswordChangeOnFirstLoginDefersPasskeyLogin(t *testing.T) {
+	previousDB := model.DB
+	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previousForce := common.ForcePasswordChangeOnFirstLoginEnabled
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	model.DB = db
+	common.RedisEnabled = false
+	common.SessionSecret = "force-password-change-passkey-test-secret"
+	common.ForcePasswordChangeOnFirstLoginEnabled = true
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
+		common.ForcePasswordChangeOnFirstLoginEnabled = previousForce
+	})
+
+	password, err := common.Password2Hash("passkey-first-password")
+	require.NoError(t, err)
+	user := &model.User{
+		Username: "force-change-passkey-user", Password: password, Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, LastLoginAt: 0,
+	}
+	require.NoError(t, db.Create(user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/passkey/login/finish", nil)
+	c.Set("login_method", "passkey")
+	setupLoginAtAuthVersion(user, user.AuthVersion, c)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var stored model.User
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.Equal(t, int64(0), stored.LastLoginAt)
+	assert.Contains(t, recorder.Body.String(), `"must_change_password":true`)
+}

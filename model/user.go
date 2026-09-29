@@ -1429,6 +1429,27 @@ func UpdateUserLastLoginAt(id int) {
 	}
 }
 
+// UserRequiresFirstLoginPasswordChange reports whether the user still must
+// change their password before using authenticated APIs. When the global switch
+// is off this is a no-op with no database lookup.
+func UserRequiresFirstLoginPasswordChange(userId int) (bool, error) {
+	if !common.ForcePasswordChangeOnFirstLoginEnabled || userId <= 0 {
+		return false, nil
+	}
+	var row struct {
+		LastLoginAt int64 `gorm:"column:last_login_at"`
+		HasPassword bool  `gorm:"column:has_password"`
+	}
+	err := DB.Model(&User{}).
+		Select("last_login_at, CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password").
+		Where("id = ?", userId).
+		Take(&row).Error
+	if err != nil {
+		return false, err
+	}
+	return row.LastLoginAt == 0 && row.HasPassword, nil
+}
+
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
